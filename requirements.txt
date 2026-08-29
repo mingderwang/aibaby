@@ -1,0 +1,5 @@
+torch>=2.0
+numpy
+pyyaml
+gymnasium>=0.29
+tensorboard

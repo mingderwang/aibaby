@@ -1,0 +1,55 @@
+# AiBaby - training configuration
+seed: 0
+device: auto              # auto | cpu | cuda | mps
+run_dir: runs/baby        # TensorBoard logs + checkpoints
+checkpoint_every: 20      # save a checkpoint every N training iterations
+resume: null              # path to a checkpoint to resume from, or null
+
+# --- World ---------------------------------------------------------------
+world:
+  num_food: [6, 10]
+  num_hazard: [4, 8]
+  num_wall: [2, 6]
+  initial_energy: 100.0
+  energy_per_timestep: 1.0
+  food_reward: 10.0
+  food_energy: 20.0
+  hazard_penalty: -15.0
+  max_steps: 200
+
+# --- Model (small Transformer, random init) ------------------------------
+model:
+  d_model: 64
+  n_heads: 4
+  n_layers: 3
+  max_seq: 512
+  drop_emb: 0.0
+
+# --- PPO -----------------------------------------------------------------
+ppo:
+  gamma: 0.99
+  lam: 0.95
+  clip_epsilon: 0.2
+  value_coef: 0.5
+  entropy_coef: 0.01
+  lr: 0.0003
+  max_grad_norm: 0.5
+  num_epochs: 4
+  batch_size: 256
+  max_steps_per_iter: 2048
+  exploration_noise: 0.1
+
+# --- Training schedule ----------------------------------------------------
+train:
+  total_iters: 500
+  eval_every: 20
+  eval_episodes: 40
+
+# --- Curriculum -----------------------------------------------------------
+curriculum:
+  start_difficulty: 0.1
+  end_difficulty: 0.9
+  success_step: 0.05
+  fail_step: 0.02
+  success_threshold: 12.0
+  eval_episodes: 24

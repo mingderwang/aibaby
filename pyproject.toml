@@ -1,0 +1,25 @@
+[project]
+name = "aibaby"
+version = "0.1.0"
+description = "A small Transformer baby learning to survive a 10x10 world via PPO, with curriculum learning, evaluation, checkpoints, TensorBoard, and language/AGI extension seams."
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0",
+    "numpy",
+    "pyyaml",
+    # Optional: for the gymnasium adapter and TensorBoard writer
+    "gymnasium>=0.29",
+    "tensorboard",
+]
+
+[project.scripts]
+aibaby-train = "aibaby.scripts.train:main"
+aibaby-play = "aibaby.scripts.play:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["aibaby*"]
