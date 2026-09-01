@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AiBaby — Timeseries</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #111318;
+    --sidebar: #202124;
+    --panel: #202124;
+    --card-bg: #1b1d21;
+    --text: #e8eaed;
+    --muted: #9aa0a6;
+    --accent: #8ab4f8;
+    --border: #3c4043;
+    --hover: #282a2e;
+    --input: #303134;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Google Sans", Roboto, "Segoe UI", Helvetica, Arial, sans-serif;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ---------- Sidebar (tag rail) ---------- */
+  #sidebar {
+    width: 258px;
+    min-width: 258px;
+    background: var(--sidebar);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .brand { padding: 14px 16px 8px; font-weight: 600; font-size: 15px; letter-spacing: .01em; }
+  .brand small { display: block; color: var(--muted); font-weight: 400; font-size: 11px; margin-top: 2px; }
+  #searchWrap { padding: 8px 12px 4px; }
+  #search {
+    width: 100%; padding: 8px 10px; background: var(--input); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-size: 13px; outline: none;
+  }
+  #search::placeholder { color: var(--muted); }
+  .sect-head { padding: 12px 16px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  #tagList { flex: 1; overflow-y: auto; padding: 4px 8px 24px; }
+  .tag {
+    display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 6px;
+    cursor: pointer; font-size: 13px; user-select: none;
+  }
+  .tag:hover { background: var(--hover); }
+  .tag .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .tag .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag .sel { margin-left: auto; font-size: 11px; color: var(--accent); opacity: 0; }
+  .tag.active .sel { opacity: 1; }
+  .tag.active { background: rgba(138,180,248,.08); color: var(--accent); }
+  footer { padding: 12px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+  /* ---------- Main ---------- */
+  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  #runbar {
+    display: flex; align-items: center; gap: 18px; padding: 12px 20px;
+    border-bottom: 1px solid var(--border); overflow-x: auto; flex-wrap: nowrap;
+  }
+  .runpick { display: flex; align-items: center; gap: 7px; font-size: 13px; white-space: nowrap; cursor: pointer; color: var(--muted); }
+  .runpick.off { opacity: .4; }
+  .runpick .sw { width: 12px; height: 12px; border-radius: 3px; }
+  .runpick.active .sw { background: var(--c); }
+  .runpick:not(.off) .sw { background: var(--c); }
+  .runpick .cb { width: 14px; height: 14px; border: 1.5px solid var(--muted); border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 10px; color:#fff; }
+  .runpick.active .cb { background: var(--c); border-color: var(--c); }
+  #charts { flex: 1; overflow-y: auto; padding: 12px 20px 40px; }
+  .empty { color: var(--muted); text-align: center; padding: 80px 0; font-size: 14px; }
+  .chart-card {
+    background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px; margin-bottom: 14px;
+  }
+  .chart-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 8px; }
+  .chart-head .t { font-size: 13px; font-weight: 500; }
+  .chart-head .t .paren { color: var(--muted); font-weight: 400; }
+  .chart-head .x { cursor: pointer; color: var(--muted); font-size: 16px; padding: 0 6px; border-radius: 4px; }
+  .chart-head .x:hover { background: var(--hover); color: var(--text); }
+  .chart-box { position: relative; height: 220px; }
+  .no-line { display: flex; align-items: center; justify-content: center; height: 220px; color: var(--muted); font-size: 13px; border: 1px dashed var(--border); border-radius: 8px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+  <aside id="sidebar">
+    <div class="brand">AiBaby <small>PPO · Transformer · timeseries</small></div>
+    <div id="searchWrap"><input id="search" placeholder="Filter tags" /></div>
+    <div class="sect-head">Metrics</div>
+    <div id="tagList"></div>
+    <footer>
+      10×10 grid world · actor-critic Transformer from scratch.<br/>
+      4 experiment versions · timeseries from TensorBoard.
+    </footer>
+  </aside>
+
+  <main id="main">
+    <div id="runbar"></div>
+    <div id="charts"></div>
+  </main>
+
+<script>
+const METRICS_URL = 'metrics.json';
+let DATA = null;
+let selectedTags = new Set([]);          // currently charted tags
+let hiddenRuns = new Set([]);            // runs hidden via runbar
+let charts = new Map();
+
+document.addEventListener('DOMContentLoaded', load);
+async function load() {
+  const res = await fetch(METRICS_URL);
+  DATA = await res.json();
+  // default: select the headline tags like TensorBoard's initial view
+  ['rollout/episode_reward','ppo/entropy','ppo/value_loss','eval/trained_success'].forEach(t => selectedTags.add(t));
+  buildTagList();
+  buildRunbar();
+  renderCharts();
+}
+
+function groupOf(tag) { return tag.split('/')[0]; }
+function shortName(tag) { return tag.split('/').slice(1).join('/'); }
+
+function buildTagList() {
+  const list = document.getElementById('tagList');
+  list.innerHTML = '';
+  const groups = {};
+  DATA.tags.forEach(t => { const g = groupOf(t); (groups[g] = groups[g] || []).push(t); });
+  const q = (document.getElementById('search').value || '').toLowerCase();
+  for (const [group, tags] of Object.entries(groups)) {
+    const head = document.createElement('div');
+    head.className = 'sect-head';
+    head.textContent = group;
+    if (q) { let any = false; tags.forEach(t => { if (t.toLowerCase().includes(q)) any = true; }); if (!any) continue; }
+    list.appendChild(head);
+    tags.forEach(tag => {
+      if (q && !tag.toLowerCase().includes(q)) return;
+      const dotColor = DATA.tags.indexOf(tag) % Object.keys(DATA.runs).length;
+      const el = document.createElement('div');
+      el.className = 'tag' + (selectedTags.has(tag) ? ' active' : '');
+      el.innerHTML = `<span class="dot" style="background:${Object.values(DATA.runs)[dotColor].meta.color}"></span>
+        <span class="name">${shortName(tag)}</span><span class="sel">✓</span>`;
+      el.title = DATA.tag_desc[tag] || '';
+      el.addEventListener('click', () => {
+        if (selectedTags.has(tag)) selectedTags.delete(tag); else selectedTags.add(tag);
+        el.classList.toggle('active', selectedTags.has(tag));
+        renderCharts();
+      });
+      list.appendChild(el);
+    });
+  }
+}
+
+function buildRunbar() {
+  const bar = document.getElementById('runbar');
+  bar.innerHTML = '';
+  Object.keys(DATA.runs).forEach(run => {
+    const m = DATA.runs[run].meta;
+    const off = hiddenRuns.has(run);
+    const el = document.createElement('div');
+    el.className = 'runpick ' + (off ? 'off' : 'active');
+    el.style.setProperty('--c', m.color);
+    el.innerHTML = `<span class="cb">${off ? '' : '✓'}</span><span class="sw"></span>${m.label}`;
+    el.addEventListener('click', () => {
+      if (hiddenRuns.has(run)) hiddenRuns.delete(run); else hiddenRuns.add(run);
+      buildRunbar();
+      renderCharts();
+    });
+    bar.appendChild(el);
+  });
+}
+
+function visibleRuns(tag) {
+  return Object.keys(DATA.runs).filter(r => !hiddenRuns.has(r) && (DATA.runs[r].series[tag] || []).length > 0);
+}
+
+function renderCharts() {
+  const wrap = document.getElementById('charts');
+  wrap.innerHTML = '';
+  charts.forEach(c => c.destroy()); charts.clear();
+
+  if (selectedTags.size === 0) {
+    wrap.innerHTML = '<div class="empty">No metrics selected. Click a tag in the left sidebar.</div>';
+    return;
+  }
+
+  // order selected tags as they appear in DATA.tags
+  const order = DATA.tags.filter(t => selectedTags.has(t));
+  order.forEach(tag => { addChart(wrap, tag); });
+}
+
+function addChart(wrap, tag) {
+  const runs = visibleRuns(tag);
+  const card = document.createElement('div');
+  card.className = 'chart-card';
+  card.innerHTML = `<div class="chart-head">
+      <div class="t">${shortName(tag)} <span class="paren">× ${runs.length}</span></div>
+      <span class="x" title="Remove">×</span></div>
+      <div style="position:relative;height:220px;"><canvas></canvas></div>`;
+  const xBtn = card.querySelector('.x');
+  xBtn.addEventListener('click', () => { selectedTags.delete(tag); refreshTagList(); renderCharts(); });
+  wrap.appendChild(card);
+
+  if (runs.length === 0) {
+    card.querySelector('.chart-head').nextElementSibling.innerHTML = '<div class="no-line">No lines for this tag.</div>';
+    return;
+  }
+
+  const canvas = card.querySelector('canvas');
+  const datasets = runs.map(r => {
+    const m = DATA.runs[r].meta;
+    return {
+      label: m.label,
+      data: DATA.runs[r].series[tag].map(p => ({ x: p[0], y: p[1] })),
+      borderColor: m.color,
+      backgroundColor: m.color,
+      borderWidth: 1.6,
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      tension: 0,
+      spanGaps: true,
+    };
+  });
+  const chart = new Chart(canvas, {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { mode: 'index', intersect: false, callbacks: { title: items => 'step ' + items[0].parsed.x } },
+      },
+      scales: {
+        x: { type: 'linear', title: { display: true, text: 'step', color: '#9aa0a6' }, ticks: { color: '#9aa0a6', maxTicksLimit: 8 }, grid: { color: 'rgba(154,160,166,.12)' } },
+        y: { ticks: { color: '#9aa0a6' }, grid: { color: 'rgba(154,160,166,.12)' } },
+      },
+    },
+  });
+  charts.set(tag, chart);
+}
+
+function refreshTagList() {
+  // re-render tag list to reflect active states without losing scroll/search
+  const prev = document.getElementById('search').value;
+  buildTagList();
+  document.getElementById('search').value = prev;
+}
+document.getElementById('search').addEventListener('input', () => buildTagList());
+</script>
+</body>
+</html>
