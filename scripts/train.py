@@ -55,6 +55,7 @@ def build(cfg: dict, world: VirtualWorld):
         lam=pcfg["lam"],
         clip_epsilon=pcfg["clip_epsilon"],
         value_coef=pcfg["value_coef"],
+        value_loss_clip=pcfg.get("value_loss_clip", 0.0),
         entropy_coef=pcfg["entropy_coef"],
         lr=pcfg["lr"],
         max_grad_norm=pcfg["max_grad_norm"],
@@ -132,7 +133,7 @@ def main() -> None:
 
         rollout_stats = collect_rollout(world, agent, buffer)
         hp.exploration_noise = max(0.0, hp.exploration_noise * 0.995)  # anneal
-        ppo_stats = agent.update(buffer)
+        ppo_stats = agent.update(buffer, bootstrap_value=rollout_stats["bootstrap_value"])
 
         logger.global_step += 1
         logger.log_scalars("rollout", rollout_stats)

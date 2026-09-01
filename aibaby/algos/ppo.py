@@ -28,8 +28,9 @@ class PPOHyperparams:
     lam: float = 0.95
     clip_epsilon: float = 0.2
     value_coef: float = 0.5
-    entropy_coef: float = 0.01
-    lr: float = 3e-4
+    value_loss_clip: float = 0.0  # 0 disables clipping of value loss
+    entropy_coef: float = 0.001
+    lr: float = 0.0001
     max_grad_norm: float = 0.5
     num_epochs: int = 4
     batch_size: int = 256
@@ -125,7 +126,9 @@ class PPOAgent:
     # ------------------------------------------------------------------ #
     # Training
     # ------------------------------------------------------------------ #
-    def update(self, buffer: RolloutBuffer) -> dict:
+    def update(
+        self, buffer: RolloutBuffer, bootstrap_value: float = 0.0
+    ) -> dict:
         """Run one PPO update over the collected rollout and return stats."""
         hp = self.hp
         obs, actions, old_logprobs, rewards, dones, values = buffer.to_torch()
@@ -138,7 +141,14 @@ class PPOAgent:
         rewards_c = rewards.to(self.device)
         dones_c = dones.to(self.device)
 
-        advantages = self._compute_gae(rewards_c, dones_c, values, hp.gamma, hp.lam)
+        advantages = self._compute_gae(
+            rewards_c,
+            dones_c,
+            values,
+            hp.gamma,
+            hp.lam,
+            torch.tensor(bootstrap_value, device=self.device),
+        )
         returns = advantages + values.detach()
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
@@ -162,6 +172,7 @@ class PPOAgent:
                 batch_old_logprobs = old_logprobs[idx_t]
                 batch_advantages = advantages[idx_t]
                 batch_returns = returns[idx_t]
+                batch_old_values = values[idx_t]
 
                 logits, value = self.model(batch_obs)
                 dist = torch.distributions.Categorical(logits=logits)
@@ -176,7 +187,19 @@ class PPOAgent:
                 )
                 policy_loss = -torch.min(surr1, surr2).mean()
 
-                value_loss = F.mse_loss(value.squeeze(-1), batch_returns)
+                value_pred = value.squeeze(-1)
+                value_loss = F.mse_loss(value_pred, batch_returns)
+                if hp.value_loss_clip > 0:
+                    # Clipped value loss to prevent critic instability.
+                    value_pred_clipped = batch_old_values + torch.clamp(
+                        value_pred - batch_old_values,
+                        -hp.value_loss_clip,
+                        hp.value_loss_clip,
+                    )
+                    value_loss = torch.max(
+                        F.mse_loss(value_pred, batch_returns, reduction="none"),
+                        F.mse_loss(value_pred_clipped, batch_returns, reduction="none"),
+                    ).mean()
                 loss = (
                     policy_loss
                     + hp.value_coef * value_loss
@@ -207,20 +230,23 @@ class PPOAgent:
         values: torch.Tensor,
         gamma: float,
         lam: float,
+        bootstrap_value: torch.Tensor,
     ) -> torch.Tensor:
-        """GAE over a fixed-length rollout (bootstrap not needed here)."""
+        """GAE over a fixed-length rollout.
+
+        The rollout may be cut mid-episode (the last stored transition is not
+        terminal). In that case the final state's value is bootstrapped via
+        ``bootstrap_value`` so the tail of the trajectory is not truncated.
+        """
         n = rewards.shape[0]
         advantages = torch.zeros_like(rewards)
         gae = 0.0
-        next_value = 0.0
+        next_value = bootstrap_value
         for t in reversed(range(n)):
-            if t == n - 1:
-                # No value bootstrap at the end of a buffer; treat terminal naturally.
-                delta = rewards[t] + gamma * next_value * (1 - dones[t]) - values[t]
-            else:
-                delta = rewards[t] + gamma * values[t + 1] * (1 - dones[t]) - values[t]
+            delta = rewards[t] + gamma * next_value * (1 - dones[t]) - values[t]
             gae = delta + gamma * lam * (1 - dones[t]) * gae
             advantages[t] = gae
+            next_value = values[t]
         return advantages
 
 
@@ -250,8 +276,18 @@ def collect_rollout(
             episodes += 1
             obs = world.reset()
 
+    # If the buffer filled up mid-episode, bootstrap the value of the
+    # remaining state so the trajectory tail is not truncated.
+    bootstrap_value = 0.0
+    if not done:
+        obs_t = torch.from_numpy(obs.astype(np.float32)).unsqueeze(0).to(agent.device)
+        with torch.no_grad():
+            _, v = agent.model(obs_t)
+        bootstrap_value = float(v.item())
+
     return {
         "episode_reward": total_reward / max(episodes, 1),
         "avg_energy": world.energy,
         "episodes": episodes,
+        "bootstrap_value": bootstrap_value,
     }
