@@ -1,7 +1,9 @@
-# AiBaby - training configuration
+# AiBaby - GRPO-tuned training configuration
+# Larger group size for more stable group-relative advantages + annealed
+# exploration noise, sized to favor the no-critic GRPO update.
 seed: 0
 device: auto              # auto | cpu | cuda | mps
-run_dir: runs/baby        # TensorBoard logs + checkpoints
+run_dir: runs/grpo_tuned  # TensorBoard logs + checkpoints
 checkpoint_every: 20      # save a checkpoint every N training iterations
 resume: null              # path to a checkpoint to resume from, or null
 
@@ -25,34 +27,19 @@ model:
   max_seq: 512
   drop_emb: 0.0
 
-# --- PPO -----------------------------------------------------------------
-ppo:
-  gamma: 0.99
-  lam: 0.95
-  clip_epsilon: 0.2
-  value_coef: 0.25
-  value_loss_clip: 0.5
-  entropy_coef: 0.001
-  lr: 0.0001
-  max_grad_norm: 0.5
-  num_epochs: 4
-  batch_size: 256
-  max_steps_per_iter: 2048
-  exploration_noise: 0.1
-
-# --- GRPO (alternative trainer, no critic) --------------------------------
+# --- GRPO (no critic) ------------------------------------------------------
 grpo:
-  entropy_coef: 0.001
-  lr: 0.0001
+  entropy_coef: 0.01
+  lr: 0.0002
   max_grad_norm: 0.5
   num_epochs: 4
   batch_size: 256
-  group_size: 8
-  exploration_noise: 0.0
+  group_size: 12
+  exploration_noise: 0.1   # annealed 0.995x per iter in the training loop
 
 # --- Training schedule ----------------------------------------------------
 train:
-  total_iters: 500
+  total_iters: 200
   eval_every: 20
   eval_episodes: 40
 
